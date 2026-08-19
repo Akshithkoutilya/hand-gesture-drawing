@@ -7,6 +7,12 @@ from mediapipe.tasks.python import vision
 
 MODEL_PATH = "models/hand_landmarker.task"
 
+CANVAS_WIDTH = 1280
+CANVAS_HEIGHT = 720
+
+BRUSH_COLOR = (0, 255, 0)
+BRUSH_SIZE = 8
+
 
 def create_hand_landmarker():
     base_options = python.BaseOptions(
@@ -32,11 +38,19 @@ def main():
         print("Error: Could not open webcam.")
         return
 
+    camera.set(cv2.CAP_PROP_FRAME_WIDTH, CANVAS_WIDTH)
+    camera.set(cv2.CAP_PROP_FRAME_HEIGHT, CANVAS_HEIGHT)
+
+    canvas = None
+    previous_point = None
+
     hand_landmarker = create_hand_landmarker()
 
     timestamp_ms = 0
 
-    print("Hand tracking started. Press Q to quit.")
+    print("Hand Gesture Drawing started.")
+    print("Move your index finger to draw.")
+    print("Press Q to quit.")
 
     while True:
         success, frame = camera.read()
@@ -46,6 +60,10 @@ def main():
             break
 
         frame = cv2.flip(frame, 1)
+
+        if canvas is None:
+            canvas = frame.copy()
+            canvas[:] = 0
 
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
@@ -61,21 +79,50 @@ def main():
             timestamp_ms,
         )
 
+        current_point = None
+
         if result.hand_landmarks:
-            for hand_landmarks in result.hand_landmarks:
-                for landmark in hand_landmarks:
-                    x = int(landmark.x * frame.shape[1])
-                    y = int(landmark.y * frame.shape[0])
+            hand_landmarks = result.hand_landmarks[0]
 
-                    cv2.circle(
-                        frame,
-                        (x, y),
-                        5,
-                        (0, 255, 0),
-                        -1,
-                    )
+            index_finger = hand_landmarks[8]
 
-        cv2.imshow("Hand Gesture Drawing", frame)
+            x = int(index_finger.x * frame.shape[1])
+            y = int(index_finger.y * frame.shape[0])
+
+            current_point = (x, y)
+
+            cv2.circle(
+                frame,
+                current_point,
+                10,
+                BRUSH_COLOR,
+                -1,
+            )
+
+            if previous_point is not None:
+                cv2.line(
+                    canvas,
+                    previous_point,
+                    current_point,
+                    BRUSH_COLOR,
+                    BRUSH_SIZE,
+                )
+
+        else:
+            previous_point = None
+
+        if current_point is not None:
+            previous_point = current_point
+
+        combined = cv2.addWeighted(
+            frame,
+            1.0,
+            canvas,
+            1.0,
+            0,
+        )
+
+        cv2.imshow("Hand Gesture Drawing", combined)
 
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
