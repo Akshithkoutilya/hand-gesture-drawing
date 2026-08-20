@@ -193,11 +193,18 @@ def main():
     )
 
     canvas = None
+
     previous_point = None
 
     hand_landmarker = create_hand_landmarker()
 
     timestamp_ms = 0
+
+    drawing_stroke = False
+
+    erasing_stroke = False
+
+    stroke_start_canvas = None
 
     print()
     print("====================================")
@@ -254,6 +261,7 @@ def main():
         )
 
         gesture = "READY"
+
         current_point = None
 
         if result.hand_landmarks:
@@ -288,9 +296,24 @@ def main():
 
                 previous_point = None
 
+                drawing_stroke = False
+                erasing_stroke = False
+
+                stroke_start_canvas = None
+
                 gesture = "COLOR SELECTED"
 
             elif gesture == "DRAW":
+
+                if not drawing_stroke:
+
+                    stroke_start_canvas = canvas.copy()
+
+                    drawing_stroke = True
+
+                    erasing_stroke = False
+
+                    redo_stack.clear()
 
                 color = COLORS[
                     current_color_name
@@ -318,6 +341,16 @@ def main():
 
             elif gesture == "ERASER":
 
+                if not erasing_stroke:
+
+                    stroke_start_canvas = canvas.copy()
+
+                    erasing_stroke = True
+
+                    drawing_stroke = False
+
+                    redo_stack.clear()
+
                 cv2.circle(
                     frame,
                     current_point,
@@ -338,9 +371,35 @@ def main():
 
             else:
 
+                if drawing_stroke or erasing_stroke:
+
+                    if stroke_start_canvas is not None:
+
+                        undo_stack.append(
+                            stroke_start_canvas
+                        )
+
+                    drawing_stroke = False
+                    erasing_stroke = False
+
+                    stroke_start_canvas = None
+
                 previous_point = None
 
         else:
+
+            if drawing_stroke or erasing_stroke:
+
+                if stroke_start_canvas is not None:
+
+                    undo_stack.append(
+                        stroke_start_canvas
+                    )
+
+                drawing_stroke = False
+                erasing_stroke = False
+
+                stroke_start_canvas = None
 
             previous_point = None
 
@@ -406,29 +465,27 @@ def main():
 
         elif key == ord("z"):
 
-            if canvas is not None:
-
-                undo_stack.append(
-                    canvas.copy()
-                )
-
-                canvas[:] = 0
-
-                if len(undo_stack) > 1:
-                    canvas[:] = undo_stack[-2]
-
-                if len(undo_stack) > 1:
-                    undo_stack.pop()
+            if undo_stack:
 
                 redo_stack.append(
                     canvas.copy()
                 )
 
+                canvas = undo_stack.pop()
+
+                previous_point = None
+
         elif key == ord("y"):
 
             if redo_stack:
 
+                undo_stack.append(
+                    canvas.copy()
+                )
+
                 canvas = redo_stack.pop()
+
+                previous_point = None
 
         elif key == ord("s"):
 
@@ -436,7 +493,12 @@ def main():
 
         elif key == ord("c"):
 
-            if canvas is not None:
+            if cv2.countNonZero(
+                cv2.cvtColor(
+                    canvas,
+                    cv2.COLOR_BGR2GRAY,
+                )
+            ) > 0:
 
                 undo_stack.append(
                     canvas.copy()
