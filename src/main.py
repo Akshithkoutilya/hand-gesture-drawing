@@ -18,12 +18,15 @@ COLORS = {
 }
 
 current_color_name = "GREEN"
+
 brush_size = 8
 
 MIN_BRUSH_SIZE = 2
 MAX_BRUSH_SIZE = 30
 
 ERASER_SIZE = 40
+
+TOOLBAR_HEIGHT = 80
 
 
 def create_hand_landmarker():
@@ -60,48 +63,76 @@ def get_gesture(hand_landmarks):
     return "READY"
 
 
+def get_toolbar_color(point):
+    if point is None:
+        return None
+
+    x, y = point
+
+    if y > TOOLBAR_HEIGHT:
+        return None
+
+    color_buttons = {
+        "GREEN": (40, 35),
+        "RED": (130, 35),
+        "BLUE": (220, 35),
+        "YELLOW": (310, 35),
+    }
+
+    for color_name, (button_x, button_y) in color_buttons.items():
+
+        distance = (
+            (x - button_x) ** 2
+            + (y - button_y) ** 2
+        ) ** 0.5
+
+        if distance <= 30:
+            return color_name
+
+    return None
+
+
 def draw_toolbar(frame, color_name, size):
-    toolbar_height = 70
 
     cv2.rectangle(
         frame,
         (0, 0),
-        (CANVAS_WIDTH, toolbar_height),
+        (CANVAS_WIDTH, TOOLBAR_HEIGHT),
         (40, 40, 40),
         -1,
     )
 
-    x_positions = {
-        "GREEN": 40,
-        "RED": 130,
-        "BLUE": 220,
-        "YELLOW": 310,
+    color_buttons = {
+        "GREEN": (40, 35),
+        "RED": (130, 35),
+        "BLUE": (220, 35),
+        "YELLOW": (310, 35),
     }
 
-    for name, x in x_positions.items():
-        color = COLORS[name]
+    for name, position in color_buttons.items():
 
         cv2.circle(
             frame,
-            (x, 35),
+            position,
             20,
-            color,
+            COLORS[name],
             -1,
         )
 
         if name == color_name:
+
             cv2.circle(
                 frame,
-                (x, 35),
-                26,
+                position,
+                27,
                 (255, 255, 255),
-                2,
+                3,
             )
 
     cv2.putText(
         frame,
         f"Brush: {size}",
-        (400, 45),
+        (370, 45),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.7,
         (255, 255, 255),
@@ -110,8 +141,8 @@ def draw_toolbar(frame, color_name, size):
 
     cv2.putText(
         frame,
-        "1 Green  2 Red  3 Blue  4 Yellow",
-        (540, 30),
+        "Move index finger to color",
+        (520, 30),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.55,
         (255, 255, 255),
@@ -120,8 +151,8 @@ def draw_toolbar(frame, color_name, size):
 
     cv2.putText(
         frame,
-        "+ / - Size   C Clear   Q Quit",
-        (540, 55),
+        "1-4 Colors | +/- Size | C Clear | Q Quit",
+        (520, 57),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.55,
         (255, 255, 255),
@@ -130,6 +161,7 @@ def draw_toolbar(frame, color_name, size):
 
 
 def main():
+
     global current_color_name
     global brush_size
 
@@ -139,8 +171,15 @@ def main():
         print("Error: Could not open webcam.")
         return
 
-    camera.set(cv2.CAP_PROP_FRAME_WIDTH, CANVAS_WIDTH)
-    camera.set(cv2.CAP_PROP_FRAME_HEIGHT, CANVAS_HEIGHT)
+    camera.set(
+        cv2.CAP_PROP_FRAME_WIDTH,
+        CANVAS_WIDTH,
+    )
+
+    camera.set(
+        cv2.CAP_PROP_FRAME_HEIGHT,
+        CANVAS_HEIGHT,
+    )
 
     canvas = None
     previous_point = None
@@ -149,20 +188,27 @@ def main():
 
     timestamp_ms = 0
 
-    print("Hand Gesture Drawing started.")
     print()
-    print("Index finger       = Draw")
-    print("Index + Middle     = Eraser")
-    print("1                  = Green")
-    print("2                  = Red")
-    print("3                  = Blue")
-    print("4                  = Yellow")
-    print("+                  = Increase brush")
-    print("-                  = Decrease brush")
-    print("C                  = Clear canvas")
-    print("Q                  = Quit")
+    print("====================================")
+    print(" Hand Gesture Drawing Application")
+    print("====================================")
+    print()
+    print("INDEX FINGER       -> DRAW")
+    print("INDEX + MIDDLE     -> ERASER")
+    print("MOVE INDEX TO COLOR -> SELECT COLOR")
+    print()
+    print("1 -> GREEN")
+    print("2 -> RED")
+    print("3 -> BLUE")
+    print("4 -> YELLOW")
+    print("+ -> Increase brush")
+    print("- -> Decrease brush")
+    print("C -> Clear canvas")
+    print("Q -> Quit")
+    print()
 
     while True:
+
         success, frame = camera.read()
 
         if not success:
@@ -172,6 +218,7 @@ def main():
         frame = cv2.flip(frame, 1)
 
         if canvas is None:
+
             canvas = frame.copy()
             canvas[:] = 0
 
@@ -193,28 +240,56 @@ def main():
         )
 
         gesture = "READY"
+
         current_point = None
 
         if result.hand_landmarks:
+
             hand_landmarks = result.hand_landmarks[0]
 
-            gesture = get_gesture(hand_landmarks)
+            gesture = get_gesture(
+                hand_landmarks
+            )
 
             index_finger = hand_landmarks[8]
 
             x = int(
-                index_finger.x * frame.shape[1]
+                index_finger.x
+                * frame.shape[1]
             )
 
             y = int(
-                index_finger.y * frame.shape[0]
+                index_finger.y
+                * frame.shape[0]
             )
 
             current_point = (x, y)
 
-            if gesture == "DRAW":
+            selected_color = get_toolbar_color(
+                current_point
+            )
 
-                color = COLORS[current_color_name]
+            if selected_color is not None:
+
+                current_color_name = selected_color
+
+                previous_point = None
+
+                gesture = "COLOR SELECTED"
+
+                cv2.circle(
+                    frame,
+                    current_point,
+                    30,
+                    (255, 255, 255),
+                    2,
+                )
+
+            elif gesture == "DRAW":
+
+                color = COLORS[
+                    current_color_name
+                ]
 
                 cv2.circle(
                     frame,
@@ -225,6 +300,7 @@ def main():
                 )
 
                 if previous_point is not None:
+
                     cv2.line(
                         canvas,
                         previous_point,
@@ -232,6 +308,8 @@ def main():
                         color,
                         brush_size,
                     )
+
+                previous_point = current_point
 
             elif gesture == "ERASER":
 
@@ -251,9 +329,14 @@ def main():
                     -1,
                 )
 
-            previous_point = current_point
+                previous_point = current_point
+
+            else:
+
+                previous_point = None
 
         else:
+
             previous_point = None
 
         combined = cv2.addWeighted(
@@ -303,23 +386,28 @@ def main():
             current_color_name = "YELLOW"
 
         elif key == ord("+") or key == ord("="):
+
             brush_size = min(
                 brush_size + 2,
                 MAX_BRUSH_SIZE,
             )
 
         elif key == ord("-"):
+
             brush_size = max(
                 brush_size - 2,
                 MIN_BRUSH_SIZE,
             )
 
         elif key == ord("c"):
+
             canvas[:] = 0
             previous_point = None
 
     hand_landmarker.close()
+
     camera.release()
+
     cv2.destroyAllWindows()
 
 
