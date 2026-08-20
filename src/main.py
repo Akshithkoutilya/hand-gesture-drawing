@@ -1,6 +1,7 @@
 import cv2
 import mediapipe as mp
 import os
+import math
 
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
@@ -27,10 +28,12 @@ MAX_BRUSH_SIZE = 30
 
 ERASER_SIZE = 40
 
-TOOLBAR_HEIGHT = 80
+TOOLBAR_HEIGHT = 85
 
 undo_stack = []
 redo_stack = []
+
+SMOOTHING_FACTOR = 0.65
 
 
 def create_hand_landmarker():
@@ -67,6 +70,23 @@ def get_gesture(hand_landmarks):
     return "READY"
 
 
+def smooth_point(previous, current):
+    if previous is None:
+        return current
+
+    x = int(
+        previous[0] * SMOOTHING_FACTOR
+        + current[0] * (1 - SMOOTHING_FACTOR)
+    )
+
+    y = int(
+        previous[1] * SMOOTHING_FACTOR
+        + current[1] * (1 - SMOOTHING_FACTOR)
+    )
+
+    return (x, y)
+
+
 def get_toolbar_color(point):
     if point is None:
         return None
@@ -77,18 +97,18 @@ def get_toolbar_color(point):
         return None
 
     color_buttons = {
-        "GREEN": (40, 35),
-        "RED": (130, 35),
-        "BLUE": (220, 35),
-        "YELLOW": (310, 35),
+        "GREEN": (45, 40),
+        "RED": (135, 40),
+        "BLUE": (225, 40),
+        "YELLOW": (315, 40),
     }
 
     for color_name, (button_x, button_y) in color_buttons.items():
 
-        distance = (
+        distance = math.sqrt(
             (x - button_x) ** 2
             + (y - button_y) ** 2
-        ) ** 0.5
+        )
 
         if distance <= 30:
             return color_name
@@ -96,21 +116,21 @@ def get_toolbar_color(point):
     return None
 
 
-def draw_toolbar(frame, color_name, size):
+def draw_toolbar(frame, color_name, size, gesture):
 
     cv2.rectangle(
         frame,
         (0, 0),
         (CANVAS_WIDTH, TOOLBAR_HEIGHT),
-        (40, 40, 40),
+        (35, 35, 35),
         -1,
     )
 
     color_buttons = {
-        "GREEN": (40, 35),
-        "RED": (130, 35),
-        "BLUE": (220, 35),
-        "YELLOW": (310, 35),
+        "GREEN": (45, 40),
+        "RED": (135, 40),
+        "BLUE": (225, 40),
+        "YELLOW": (315, 40),
     }
 
     for name, position in color_buttons.items():
@@ -128,29 +148,49 @@ def draw_toolbar(frame, color_name, size):
             cv2.circle(
                 frame,
                 position,
-                27,
+                28,
                 (255, 255, 255),
                 3,
             )
 
     cv2.putText(
         frame,
-        f"Brush: {size}",
-        (370, 45),
+        f"COLOR: {color_name}",
+        (370, 30),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.7,
+        0.6,
         (255, 255, 255),
         2,
     )
 
     cv2.putText(
         frame,
-        "1-4 Colors | +/- Size | Z Undo | Y Redo | S Save | C Clear | Q Quit",
-        (520, 45),
+        f"BRUSH: {size}px",
+        (370, 60),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.48,
+        0.6,
         (255, 255, 255),
         2,
+    )
+
+    cv2.putText(
+        frame,
+        f"TOOL: {gesture}",
+        (560, 30),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        COLORS[color_name],
+        2,
+    )
+
+    cv2.putText(
+        frame,
+        "1-4 Colors | +/- Size | Z Undo | Y Redo | S Save | C Clear | Q Quit",
+        (560, 60),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.48,
+        (220, 220, 220),
+        1,
     )
 
 
@@ -195,16 +235,18 @@ def main():
     canvas = None
 
     previous_point = None
+    smooth_previous_point = None
 
     hand_landmarker = create_hand_landmarker()
 
     timestamp_ms = 0
 
     drawing_stroke = False
-
     erasing_stroke = False
 
     stroke_start_canvas = None
+
+    previous_gesture = "READY"
 
     print()
     print("====================================")
@@ -239,7 +281,6 @@ def main():
         frame = cv2.flip(frame, 1)
 
         if canvas is None:
-
             canvas = frame.copy()
             canvas[:] = 0
 
@@ -261,7 +302,6 @@ def main():
         )
 
         gesture = "READY"
-
         current_point = None
 
         if result.hand_landmarks:
@@ -274,17 +314,17 @@ def main():
 
             index_finger = hand_landmarks[8]
 
-            x = int(
-                index_finger.x
-                * frame.shape[1]
+            raw_point = (
+                int(index_finger.x * frame.shape[1]),
+                int(index_finger.y * frame.shape[0]),
             )
 
-            y = int(
-                index_finger.y
-                * frame.shape[0]
+            current_point = smooth_point(
+                smooth_previous_point,
+                raw_point,
             )
 
-            current_point = (x, y)
+            smooth_previous_point = current_point
 
             selected_color = get_toolbar_color(
                 current_point
@@ -295,22 +335,39 @@ def main():
                 current_color_name = selected_color
 
                 previous_point = None
+                smooth_previous_point = None
 
                 drawing_stroke = False
                 erasing_stroke = False
 
                 stroke_start_canvas = None
 
-                gesture = "COLOR SELECTED"
+                gesture = "COLOR"
 
-            elif gesture == "DRAW":
+            elif gesture != previous_gesture:
+
+                if drawing_stroke or erasing_stroke:
+
+                    if stroke_start_canvas is not None:
+
+                        undo_stack.append(
+                            stroke_start_canvas
+                        )
+
+                    drawing_stroke = False
+                    erasing_stroke = False
+
+                    stroke_start_canvas = None
+
+                previous_point = None
+
+            if gesture == "DRAW":
 
                 if not drawing_stroke:
 
                     stroke_start_canvas = canvas.copy()
 
                     drawing_stroke = True
-
                     erasing_stroke = False
 
                     redo_stack.clear()
@@ -346,7 +403,6 @@ def main():
                     stroke_start_canvas = canvas.copy()
 
                     erasing_stroke = True
-
                     drawing_stroke = False
 
                     redo_stack.clear()
@@ -371,19 +427,6 @@ def main():
 
             else:
 
-                if drawing_stroke or erasing_stroke:
-
-                    if stroke_start_canvas is not None:
-
-                        undo_stack.append(
-                            stroke_start_canvas
-                        )
-
-                    drawing_stroke = False
-                    erasing_stroke = False
-
-                    stroke_start_canvas = None
-
                 previous_point = None
 
         else:
@@ -402,6 +445,9 @@ def main():
                 stroke_start_canvas = None
 
             previous_point = None
+            smooth_previous_point = None
+
+        previous_gesture = gesture
 
         combined = cv2.addWeighted(
             frame,
@@ -415,6 +461,7 @@ def main():
             combined,
             current_color_name,
             brush_size,
+            gesture,
         )
 
         cv2.putText(
