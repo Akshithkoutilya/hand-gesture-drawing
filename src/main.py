@@ -1,5 +1,6 @@
 import cv2
 import mediapipe as mp
+import os
 
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
@@ -27,6 +28,9 @@ MAX_BRUSH_SIZE = 30
 ERASER_SIZE = 40
 
 TOOLBAR_HEIGHT = 80
+
+undo_stack = []
+redo_stack = []
 
 
 def create_hand_landmarker():
@@ -141,23 +145,30 @@ def draw_toolbar(frame, color_name, size):
 
     cv2.putText(
         frame,
-        "Move index finger to color",
-        (520, 30),
+        "1-4 Colors | +/- Size | Z Undo | Y Redo | S Save | C Clear | Q Quit",
+        (520, 45),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.55,
+        0.48,
         (255, 255, 255),
         2,
     )
 
-    cv2.putText(
-        frame,
-        "1-4 Colors | +/- Size | C Clear | Q Quit",
-        (520, 57),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.55,
-        (255, 255, 255),
-        2,
+
+def save_canvas(canvas):
+
+    os.makedirs("drawings", exist_ok=True)
+
+    filename = "drawings/drawing.png"
+
+    success = cv2.imwrite(
+        filename,
+        canvas,
     )
+
+    if success:
+        print(f"Drawing saved: {filename}")
+    else:
+        print("Error: Could not save drawing.")
 
 
 def main():
@@ -193,8 +204,8 @@ def main():
     print(" Hand Gesture Drawing Application")
     print("====================================")
     print()
-    print("INDEX FINGER       -> DRAW")
-    print("INDEX + MIDDLE     -> ERASER")
+    print("INDEX FINGER        -> DRAW")
+    print("INDEX + MIDDLE      -> ERASER")
     print("MOVE INDEX TO COLOR -> SELECT COLOR")
     print()
     print("1 -> GREEN")
@@ -203,6 +214,9 @@ def main():
     print("4 -> YELLOW")
     print("+ -> Increase brush")
     print("- -> Decrease brush")
+    print("Z -> Undo")
+    print("Y -> Redo")
+    print("S -> Save drawing")
     print("C -> Clear canvas")
     print("Q -> Quit")
     print()
@@ -240,7 +254,6 @@ def main():
         )
 
         gesture = "READY"
-
         current_point = None
 
         if result.hand_landmarks:
@@ -276,14 +289,6 @@ def main():
                 previous_point = None
 
                 gesture = "COLOR SELECTED"
-
-                cv2.circle(
-                    frame,
-                    current_point,
-                    30,
-                    (255, 255, 255),
-                    2,
-                )
 
             elif gesture == "DRAW":
 
@@ -399,9 +404,48 @@ def main():
                 MIN_BRUSH_SIZE,
             )
 
+        elif key == ord("z"):
+
+            if canvas is not None:
+
+                undo_stack.append(
+                    canvas.copy()
+                )
+
+                canvas[:] = 0
+
+                if len(undo_stack) > 1:
+                    canvas[:] = undo_stack[-2]
+
+                if len(undo_stack) > 1:
+                    undo_stack.pop()
+
+                redo_stack.append(
+                    canvas.copy()
+                )
+
+        elif key == ord("y"):
+
+            if redo_stack:
+
+                canvas = redo_stack.pop()
+
+        elif key == ord("s"):
+
+            save_canvas(canvas)
+
         elif key == ord("c"):
 
-            canvas[:] = 0
+            if canvas is not None:
+
+                undo_stack.append(
+                    canvas.copy()
+                )
+
+                canvas[:] = 0
+
+                redo_stack.clear()
+
             previous_point = None
 
     hand_landmarker.close()
